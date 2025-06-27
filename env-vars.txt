@@ -1,0 +1,11 @@
+# Environment variables for Render deployment
+# Copy these into the Render dashboard for your backend service
+
+NEON_DB_URL=postgresql://neondb_owner:npg_PVs3ewizcxA5@ep-shiny-math-a8lmusqf-pooler.eastus2.azure.neon.tech/before_verify2
+NEON_AFTER_DB_URL=postgresql://neondb_owner:npg_PVs3ewizcxA5@ep-shiny-math-a8lmusqf-pooler.eastus2.azure.neon.tech/after_verify2
+AZURE_ENDPOINT=https://santosh-ocr-api.cognitiveservices.azure.com/
+AZURE_API_KEY=1gMnawu4bvcfPxefrGorXX4TJVjE8apKsG6z1uUQdKRmHBaUeFSaJQQJ99BFACGhslBXJ3w3AAAFACOGqdr1
+API_KEY=your-groq-api-key-here
+
+# For frontend (Static Site on Render), set this:
+# VITE_API_URL=https://your-backend-service.onrender.com 

@@ -1,0 +1,14 @@
+# Render Static Site (Frontend) Setup
+
+# Root Directory:
+my-react-app
+
+# Build Command:
+npm install && npm run build
+
+# Publish Directory:
+dist
+
+# Environment Variable:
+VITE_API_URL=https://your-backend-service.onrender.com
+# (Replace with your actual backend Render URL after backend deploys) 
