@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: document-processor-backend
+    env: node
+    buildCommand: |
+      npm install
+      pip install psycopg2-binary
+      # Install GraphicsMagick for pdf2pic
+      apt-get update && apt-get install -y graphicsmagick
+    startCommand: node backend/server.js
+    envVars:
+      - key: NEON_DB_URL
+        value: postgresql://neondb_owner:npg_PVs3ewizcxA5@ep-shiny-math-a8lmusqf-pooler.eastus2.azure.neon.tech/before_verify2
+      - key: NEON_AFTER_DB_URL
+        value: postgresql://neondb_owner:npg_PVs3ewizcxA5@ep-shiny-math-a8lmusqf-pooler.eastus2.azure.neon.tech/after_verify2
+      - key: AZURE_ENDPOINT
+        sync: false
+      - key: AZURE_API_KEY
+        sync: false
+      - key: API_KEY
+        sync: false 
