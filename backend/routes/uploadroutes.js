@@ -43,7 +43,7 @@ async function insertToPostgres(data) {
   return new Promise((resolve, reject) => {
     const scriptPath = path.join(__dirname, '..', 'insert_to_pg.py');
     const py = spawn(
-      'python3',
+      'C:/Users/R Santosh Kumaar/AppData/Local/Programs/Python/Python313/python.exe',
       [scriptPath]
     );
     let stderr = '';

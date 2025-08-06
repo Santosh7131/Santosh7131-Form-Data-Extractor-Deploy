@@ -1,13 +1,22 @@
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
-const { fromPath } = require('pdf2pic');
+const poppler = require('pdf-poppler');
 require('dotenv').config();
 
+/**
+ * Azure OCR API configuration
+ * TODO: Move these to environment variables for better security
+ */
 const AZURE_ENDPOINT = process.env.AZURE_ENDPOINT || 'https://santosh-ocr-api.cognitiveservices.azure.com/';
 const AZURE_API_KEY = process.env.AZURE_API_KEY || '1gMnawu4bvcfPxefrGorXX4TJVjE8apKsG6z1uUQdKRmHBaUeFSaJQQJ99BFACGhslBXJ3w3AAAFACOGqdr1';
 
-// Helper: Call Azure OCR on an image file
+/**
+ * Extracts text from an image using Azure's OCR API
+ * @param {string} imagePath - Path to the image file
+ * @returns {Promise<string>} - Extracted text from the image
+ * @throws {Error} If Azure OCR fails or times out
+ */
 async function extractTextWithAzure(imagePath) {
     const imageData = fs.readFileSync(imagePath);
     const url = `${AZURE_ENDPOINT.replace(/\/$/, '')}/vision/v3.2/read/analyze`;
@@ -19,6 +28,8 @@ async function extractTextWithAzure(imagePath) {
     });
     const operationLocation = response.headers['operation-location'];
     let result = null;
+
+    // Poll for results (max 15 seconds)
     for (let i = 0; i < 15; i++) {
         await new Promise(res => setTimeout(res, 1000));
         const resultResponse = await axios.get(operationLocation, {
@@ -38,65 +49,70 @@ async function extractTextWithAzure(imagePath) {
     return result;
 }
 
-// Helper: Convert PDF to images (one per page) using pdf2pic
+/**
+ * Converts a PDF file to JPEG images (one per page)
+ * @param {string} pdfPath - Path to the PDF file
+ * @returns {Promise<{images: string[], outputDir: string}>} - Array of image paths and output directory
+ * @throws {Error} If no images are generated
+ */
 async function pdfToImages(pdfPath) {
     const outputDir = path.join(path.dirname(pdfPath), path.basename(pdfPath, path.extname(pdfPath)) + '_images');
+    if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir);
     
-    // Clean up existing directory if it exists
-    if (fs.existsSync(outputDir)) {
-        fs.rmSync(outputDir, { recursive: true, force: true });
-    }
-    
-    // Create fresh directory
-    fs.mkdirSync(outputDir, { recursive: true });
-    
-    const options = {
-        density: 300,           // output pixels per inch
-        saveFilename: "page",   // output filename
-        savePath: outputDir,    // output path
-        format: "jpeg",         // output format
-        width: 2048,           // output width
-        height: 2048           // output height
+    const opts = {
+        format: 'jpeg',
+        out_dir: outputDir,
+        out_prefix: 'page',
+        page: null,
+        jpegFile: true,
+        resolution: 300,
     };
     
-    try {
-        const convert = fromPath(pdfPath, options);
-        const pageData = await convert.bulk(-1); // convert all pages
-        
-        // Wait a moment for files to be written
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        // Get all generated images
-        const images = fs.readdirSync(outputDir)
-            .filter(f => f.endsWith('.jpg') || f.endsWith('.jpeg'))
-            .map(f => path.join(outputDir, f))
-            .sort(); // Ensure consistent order
-        
-        if (images.length === 0) throw new Error('No images generated from PDF');
-        return { images, outputDir };
-    } catch (error) {
-        // Clean up on error
-        if (fs.existsSync(outputDir)) {
-            fs.rmSync(outputDir, { recursive: true, force: true });
-        }
-        throw new Error(`PDF conversion failed: ${error.message}`);
-    }
+    await poppler.convert(pdfPath, opts);
+    
+    // Get all generated images
+    const images = fs.readdirSync(outputDir)
+        .filter(f => f.endsWith('.jpg') || f.endsWith('.jpeg'))
+        .map(f => path.join(outputDir, f));
+    
+    if (images.length === 0) throw new Error('No images generated from PDF');
+    return { images, outputDir };
 }
 
-// AI structuring logic (unchanged)
-const API_KEY = process.env.API_KEY;
-const API_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions'; 
+/**
+ * Groq AI API configuration for text structuring
+ * TODO: Move API key to environment variables
+ */
+const API_KEY = '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';
+const API_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
+
+/**
+ * Extracts JSON from AI response text
+ * @param {string} text - AI response text
+ * @returns {Object|null} - Parsed JSON or null if parsing fails
+ */
 function extractJsonFromText(text) {
+    // Try to extract JSON from code block
     const codeBlockMatch = text.match(/```[\s\S]*?({[\s\S]*?})[\s\S]*?```/);
     if (codeBlockMatch && codeBlockMatch[1]) {
         try { return JSON.parse(codeBlockMatch[1]); } catch (e) {}
     }
+    
+    // Try to extract JSON directly
     const jsonMatch = text.match(/{[\s\S]*}/);
     if (jsonMatch) {
         try { return JSON.parse(jsonMatch[0]); } catch (e) {}
     }
+    
     return null;
 }
+
+/**
+ * Processes extracted text with Groq AI to structure it into JSON format
+ * @param {string} text - Raw text to process
+ * @param {boolean} retry - Whether this is a retry attempt
+ * @returns {Promise<Object>} - Structured data or error object
+ */
 async function processTextWithAI(text, retry = true) {
     try {
         const requestBody = {
@@ -114,19 +130,24 @@ async function processTextWithAI(text, retry = true) {
             temperature: 0.5,
             max_tokens: 1024
         };
+
         const requestHeaders = {
             'Authorization': `Bearer ${API_KEY}`,
             'Content-Type': 'application/json'
         };
+
         const response = await axios.post(API_ENDPOINT, requestBody, { headers: requestHeaders });
+        
         try {
             let aiResponse = response.data.choices[0].message.content;
             const extracted = extractJsonFromText(aiResponse);
             if (extracted) return extracted;
+            
             if (retry) {
                 console.warn('Groq response not in JSON format, retrying once...');
                 return await processTextWithAI(text, false);
             }
+            
             return {
                 raw_text: text,
                 structured_data: aiResponse,
@@ -137,6 +158,7 @@ async function processTextWithAI(text, retry = true) {
                 console.warn('Groq response parse error, retrying once...');
                 return await processTextWithAI(text, false);
             }
+            
             return {
                 raw_text: text,
                 structured_data: response.data.choices[0].message.content,
@@ -149,25 +171,37 @@ async function processTextWithAI(text, retry = true) {
     }
 }
 
-// Main: Extract text from image (Azure)
+/**
+ * Main function to extract and structure text from an image
+ * @param {string} filePath - Path to the image file
+ * @returns {Promise<Object>} - Structured data from the image
+ */
 async function extractTextFromImage(filePath) {
     const rawText = await extractTextWithAzure(filePath);
     return processTextWithAI(rawText);
 }
 
-// Main: Extract text from PDF (convert to images, then Azure)
+/**
+ * Main function to extract and structure text from a scanned PDF
+ * @param {string} pdfPath - Path to the PDF file
+ * @returns {Promise<Object>} - Structured data from the PDF
+ */
 async function extractTextFromScannedPDF(pdfPath) {
     const { images, outputDir } = await pdfToImages(pdfPath);
     let allText = '';
+    
+    // Process each page
     for (const img of images) {
         const text = await extractTextWithAzure(img);
         allText += text + '\n';
     }
-    // Clean up images after processing
+    
+    // Clean up temporary images
     for (const img of images) {
         if (fs.existsSync(img)) fs.unlinkSync(img);
     }
     if (fs.existsSync(outputDir)) fs.rmdirSync(outputDir, { recursive: true });
+    
     return processTextWithAI(allText);
 }
 
